@@ -20,12 +20,14 @@ struct MenuBarLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             Image("ClaudeIcon")
+                .renderingMode(.template)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 16, height: 16)
             Text(usageText)
                 .font(.system(.body, design: .monospaced))
         }
+        .foregroundColor(.primary)
     }
 
     private var usageText: String {
