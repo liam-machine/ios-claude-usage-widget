@@ -8,6 +8,8 @@ class KeychainService {
 
     private init() {}
 
+    // MARK: - Claude Code Keychain Access
+
     func getOAuthToken() -> String? {
         // First try the environment variable
         if let envToken = ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"] {
@@ -16,6 +18,31 @@ class KeychainService {
 
         // Then try the Keychain
         return getTokenFromKeychain()
+    }
+
+    /// Get full OAuth credentials from Claude Code's keychain
+    func getClaudeCodeCredentials() -> OAuthCredentials? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let claudeAiOauth = json["claudeAiOauth"] as? [String: Any],
+              let accessToken = claudeAiOauth["accessToken"] as? String,
+              let refreshToken = claudeAiOauth["refreshToken"] as? String,
+              let expiresAt = claudeAiOauth["expiresAt"] as? Int64 else {
+            return nil
+        }
+
+        return OAuthCredentials(accessToken: accessToken, refreshToken: refreshToken, expiresAtMs: expiresAt)
     }
 
     private func getTokenFromKeychain() -> String? {
@@ -111,6 +138,7 @@ class KeychainService {
     // MARK: - Multi-Account Token Management (Single Keychain Item)
 
     private let allTokensServiceName = "ClaudeUsageWidget-tokens"
+    private let allCredentialsServiceName = "ClaudeUsageWidget-credentials"
 
     private func getAllTokens() -> [String: String] {
         let query: [String: Any] = [
@@ -168,5 +196,76 @@ class KeychainService {
         var tokens = getAllTokens()
         tokens.removeValue(forKey: accountId)
         _ = saveAllTokens(tokens)
+    }
+
+    // MARK: - Full Credentials Management (with refresh tokens)
+
+    private func getAllCredentials() -> [String: OAuthCredentials] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: allCredentialsServiceName,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let credentials = try? JSONDecoder().decode([String: OAuthCredentials].self, from: data) else {
+            return [:]
+        }
+
+        return credentials
+    }
+
+    private func saveAllCredentials(_ credentials: [String: OAuthCredentials]) -> Bool {
+        guard let data = try? JSONEncoder().encode(credentials) else { return false }
+
+        // Delete existing
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: allCredentialsServiceName
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        // Add new
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: allCredentialsServiceName,
+            kSecValueData as String: data
+        ]
+
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        return status == errSecSuccess
+    }
+
+    func saveCredentials(_ credentials: OAuthCredentials, forAccountId accountId: String) -> Bool {
+        var allCreds = getAllCredentials()
+        allCreds[accountId] = credentials
+        return saveAllCredentials(allCreds)
+    }
+
+    func getCredentials(forAccountId accountId: String) -> OAuthCredentials? {
+        let allCreds = getAllCredentials()
+        return allCreds[accountId]
+    }
+
+    func updateAccessToken(_ accessToken: String, expiresAt: Date, forAccountId accountId: String) -> Bool {
+        var allCreds = getAllCredentials()
+        guard var creds = allCreds[accountId] else { return false }
+        creds.accessToken = accessToken
+        creds.expiresAt = expiresAt
+        allCreds[accountId] = creds
+        return saveAllCredentials(allCreds)
+    }
+
+    func deleteCredentials(forAccountId accountId: String) {
+        var allCreds = getAllCredentials()
+        allCreds.removeValue(forKey: accountId)
+        _ = saveAllCredentials(allCreds)
+        // Also clean up legacy token storage
+        deleteToken(forAccountId: accountId)
     }
 }

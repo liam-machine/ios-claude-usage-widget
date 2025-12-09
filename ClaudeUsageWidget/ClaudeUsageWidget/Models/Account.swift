@@ -1,10 +1,38 @@
 import Foundation
 
+// MARK: - OAuth Credentials
+
+struct OAuthCredentials: Codable, Equatable {
+    var accessToken: String
+    var refreshToken: String
+    var expiresAt: Date
+
+    var isExpired: Bool {
+        // Consider expired 5 minutes before actual expiry for safety
+        return Date() >= expiresAt.addingTimeInterval(-300)
+    }
+
+    init(accessToken: String, refreshToken: String, expiresAt: Date) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+    }
+
+    // Initialize from Claude Code keychain format (expiresAt is milliseconds since epoch)
+    init(accessToken: String, refreshToken: String, expiresAtMs: Int64) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresAt = Date(timeIntervalSince1970: Double(expiresAtMs) / 1000.0)
+    }
+}
+
+// MARK: - Account
+
 struct Account: Identifiable, Codable, Equatable {
     let id: UUID
     var name: String
     var icon: String  // Emoji icon for the account
-    var token: String
+    var token: String  // Legacy - kept for backwards compatibility
 
     init(id: UUID = UUID(), name: String, icon: String = "👤", token: String = "") {
         self.id = id

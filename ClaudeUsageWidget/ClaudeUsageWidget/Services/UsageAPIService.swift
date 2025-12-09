@@ -8,11 +8,30 @@ class UsageAPIService {
 
     private init() {}
 
+    /// Fetch usage for a specific account (preferred method)
+    func fetchUsage(for account: Account) async throws -> UsageData {
+        // Use TokenService to get a valid token
+        guard let token = TokenService.shared.getValidToken(for: account) else {
+            // Check if token is expired vs missing
+            if TokenService.shared.isTokenExpiredOrMissing(for: account) {
+                if KeychainService.shared.getCredentials(forAccountId: account.id.uuidString) != nil {
+                    throw UsageError.tokenExpired
+                }
+            }
+            throw UsageError.tokenNotFound
+        }
+
+        return try await fetchUsageWithToken(token)
+    }
+
     func fetchUsage(withToken token: String? = nil) async throws -> UsageData {
         guard let effectiveToken = token ?? keychainService.getEffectiveToken() else {
             throw UsageError.tokenNotFound
         }
-        let token = effectiveToken
+        return try await fetchUsageWithToken(effectiveToken)
+    }
+
+    private func fetchUsageWithToken(_ token: String) async throws -> UsageData {
 
         var request = URLRequest(url: usageURL)
         request.httpMethod = "GET"

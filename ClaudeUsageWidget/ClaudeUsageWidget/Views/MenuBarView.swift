@@ -73,11 +73,7 @@ struct MenuBarView: View {
                 .background(retroGray)
 
                 Button("Import from Claude") {
-                    if let token = KeychainService.shared.getOAuthToken(),
-                       let account = viewModel.selectedAccount {
-                        viewModel.accountManager.updateToken(for: account, token: token)
-                        viewModel.refresh()
-                    }
+                    _ = viewModel.importCredentialsFromClaudeCode()
                 }
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(.black)
@@ -91,6 +87,11 @@ struct MenuBarView: View {
 
     private func errorView(_ error: UsageError) -> some View {
         VStack(spacing: 12) {
+            // Account toggle (only show if there are multiple accounts)
+            if viewModel.accountManager.accounts.count > 1 {
+                accountToggle
+            }
+
             Text("[ ERROR ]")
                 .font(.system(.headline, design: .monospaced))
                 .foregroundColor(.red)
@@ -110,16 +111,24 @@ struct MenuBarView: View {
                 .padding(.vertical, 6)
                 .background(retroGray)
 
-                if case .unauthorized = error {
-                    Button("Update Token") {
-                        showingTokenInput = true
+                // Show import button for errors that require re-authentication
+                if error.requiresReimport {
+                    Button("Import from Claude") {
+                        _ = viewModel.importCredentialsFromClaudeCode()
                     }
                     .font(.system(.caption, design: .monospaced))
                     .foregroundColor(.black)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(retroGray)
+                    .background(Color.green.opacity(0.7))
                 }
+            }
+
+            if error.requiresReimport {
+                Text("Log into this account in Claude CLI, then click Import")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(retroGray.opacity(0.5))
+                    .multilineTextAlignment(.center)
             }
         }
         .padding()
@@ -166,34 +175,46 @@ struct MenuBarView: View {
                 .background(retroBorder)
 
             // Footer
-            HStack {
-                Text("Last updated: \(viewModel.lastUpdatedText)")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundColor(retroGray.opacity(0.6))
+            VStack(spacing: 4) {
+                HStack {
+                    Text("Last updated: \(viewModel.lastUpdatedText)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(retroGray.opacity(0.6))
 
-                Spacer()
+                    Spacer()
 
-                Button(action: { viewModel.refresh() }) {
-                    Text("↻ Refresh")
-                        .font(.system(.caption, design: .monospaced))
+                    Button(action: { viewModel.refresh() }) {
+                        Text("↻ Refresh")
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(retroGray)
+                    .disabled(viewModel.isLoading)
+
+                    Button(action: { showingSettings = true }) {
+                        Text("⚙ Settings")
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(retroGray)
+
+                    Button(action: { NSApplication.shared.terminate(nil) }) {
+                        Text("×")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(retroGray)
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(retroGray)
-                .disabled(viewModel.isLoading)
 
-                Button(action: { showingSettings = true }) {
-                    Text("⚙ Settings")
-                        .font(.system(.caption, design: .monospaced))
+                // Token expiry info
+                if let expiryText = viewModel.tokenExpiryDescription {
+                    HStack {
+                        Text("Token: \(expiryText)")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(expiryText == "Expired" ? .red : retroGray.opacity(0.5))
+                        Spacer()
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(retroGray)
-
-                Button(action: { NSApplication.shared.terminate(nil) }) {
-                    Text("×")
-                        .font(.system(.body, design: .monospaced))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(retroGray)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)

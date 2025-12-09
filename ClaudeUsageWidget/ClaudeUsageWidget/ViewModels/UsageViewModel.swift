@@ -39,16 +39,14 @@ class UsageViewModel: ObservableObject {
         isLoading = true
         error = nil
 
-        // Get token for selected account
-        let token: String?
-        if let account = selectedAccount {
-            token = accountManager.getToken(for: account)
-        } else {
-            token = nil
+        guard let account = selectedAccount else {
+            error = .tokenNotFound
+            isLoading = false
+            return
         }
 
         do {
-            usageData = try await apiService.fetchUsage(withToken: token)
+            usageData = try await apiService.fetchUsage(for: account)
             lastUpdated = Date()
         } catch let usageError as UsageError {
             error = usageError
@@ -57,6 +55,22 @@ class UsageViewModel: ObservableObject {
         }
 
         isLoading = false
+    }
+
+    /// Import credentials from Claude Code for the selected account
+    func importCredentialsFromClaudeCode() -> Bool {
+        guard let account = selectedAccount else { return false }
+        let success = TokenService.shared.importFromClaudeCode(for: account)
+        if success {
+            refresh()
+        }
+        return success
+    }
+
+    /// Get expiry description for current account
+    var tokenExpiryDescription: String? {
+        guard let account = selectedAccount else { return nil }
+        return TokenService.shared.expiryDescription(for: account)
     }
 
     func selectAccount(_ account: Account) {
