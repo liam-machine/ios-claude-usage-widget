@@ -16,17 +16,27 @@ A macOS menu bar widget that displays your Claude API usage in real-time.
 ## Requirements
 
 - macOS 13.0 or later
-- Xcode 15.0 or later (for building from source)
 - A Claude account with API access
 
 ## Installation
 
+### Download (Recommended)
+
+1. Download the latest release from the [Releases page](https://github.com/liam-machine/ios-claude-usage-widget/releases)
+2. Unzip `ClaudeUsageWidget.zip`
+3. Drag `ClaudeUsageWidget.app` to your Applications folder
+4. Double-click to launch
+
+The app is signed and notarized by Apple, so it will run without any security warnings.
+
 ### Building from Source
+
+If you prefer to build from source:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/claude-usage-widget.git
-   cd claude-usage-widget
+   git clone https://github.com/liam-machine/ios-claude-usage-widget.git
+   cd ios-claude-usage-widget
    ```
 
 2. Open the project in Xcode:
@@ -34,7 +44,7 @@ A macOS menu bar widget that displays your Claude API usage in real-time.
    open ClaudeUsageWidget/ClaudeUsageWidget.xcodeproj
    ```
 
-3. Build and run the project (⌘R) or archive it for distribution (Product → Archive)
+3. Build and run the project (⌘R)
 
 4. The widget will appear in your menu bar showing your current usage percentage
 

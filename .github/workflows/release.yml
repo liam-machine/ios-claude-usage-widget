@@ -1,0 +1,124 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate
+          echo "$CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # Allow codesign to access the key
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+      - name: Build app
+        run: |
+          cd ClaudeUsageWidget
+          xcodebuild clean build \
+            -project ClaudeUsageWidget.xcodeproj \
+            -scheme ClaudeUsageWidget \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application: Liam Wynne (53FBF5CS9U)" \
+            DEVELOPMENT_TEAM=53FBF5CS9U
+
+      - name: Sign app with timestamp
+        run: |
+          codesign --force --options runtime --timestamp \
+            --entitlements ClaudeUsageWidget/ClaudeUsageWidget/ClaudeUsageWidget.entitlements \
+            --sign "Developer ID Application: Liam Wynne (53FBF5CS9U)" \
+            ClaudeUsageWidget/build/Build/Products/Release/ClaudeUsageWidget.app
+
+      - name: Create zip for notarization
+        run: |
+          cd ClaudeUsageWidget/build/Build/Products/Release
+          ditto -c -k --keepParent ClaudeUsageWidget.app ClaudeUsageWidget.zip
+
+      - name: Notarize app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: 53FBF5CS9U
+        run: |
+          xcrun notarytool submit ClaudeUsageWidget/build/Build/Products/Release/ClaudeUsageWidget.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+      - name: Staple notarization ticket
+        run: |
+          xcrun stapler staple ClaudeUsageWidget/build/Build/Products/Release/ClaudeUsageWidget.app
+
+      - name: Create final zip
+        run: |
+          cd ClaudeUsageWidget/build/Build/Products/Release
+          rm ClaudeUsageWidget.zip
+          ditto -c -k --keepParent ClaudeUsageWidget.app ClaudeUsageWidget.zip
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(defaults read "$(pwd)/ClaudeUsageWidget/build/Build/Products/Release/ClaudeUsageWidget.app/Contents/Info.plist" CFBundleShortVersionString)
+          BUILD=$(defaults read "$(pwd)/ClaudeUsageWidget/build/Build/Products/Release/ClaudeUsageWidget.app/Contents/Info.plist" CFBundleVersion)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION-$BUILD-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Claude Usage Widget ${{ steps.version.outputs.version }}
+          body: |
+            ## Claude Usage Widget v${{ steps.version.outputs.version }}
+
+            ### Installation
+            1. Download `ClaudeUsageWidget.zip` below
+            2. Unzip the file
+            3. Drag `ClaudeUsageWidget.app` to your Applications folder
+            4. Double-click to launch
+
+            The app is signed and notarized by Apple.
+
+            ### Requirements
+            - macOS 13.0 or later
+            - A Claude account with API access
+          files: ClaudeUsageWidget/build/Build/Products/Release/ClaudeUsageWidget.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
