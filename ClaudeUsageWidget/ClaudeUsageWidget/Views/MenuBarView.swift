@@ -109,6 +109,12 @@ struct MenuBarView: View {
                     .font(.system(.headline, design: .monospaced))
                     .foregroundColor(retroGray)
                 Spacer()
+                Image("LiamIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 32, height: 32)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(retroGray.opacity(0.5), lineWidth: 1))
             }
             .padding()
 
