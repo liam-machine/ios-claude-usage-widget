@@ -8,10 +8,11 @@ class UsageAPIService {
 
     private init() {}
 
-    func fetchUsage() async throws -> UsageData {
-        guard let token = keychainService.getEffectiveToken() else {
+    func fetchUsage(withToken token: String? = nil) async throws -> UsageData {
+        guard let effectiveToken = token ?? keychainService.getEffectiveToken() else {
             throw UsageError.tokenNotFound
         }
+        let token = effectiveToken
 
         var request = URLRequest(url: usageURL)
         request.httpMethod = "GET"

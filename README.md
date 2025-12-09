@@ -5,10 +5,13 @@ A macOS menu bar widget that displays your Claude API usage in real-time.
 ## Features
 
 - Displays current usage percentage in the menu bar
-- Shows detailed breakdown of 5-hour and daily usage windows
+- Shows detailed breakdown of 5-hour and 7-day usage windows
+- **Multi-account support**: Track usage across multiple Claude accounts (e.g., Personal and Work)
+- Quick account switching via emoji icons in the menu bar
 - Auto-refreshes at configurable intervals (1-30 minutes)
 - Optional launch at login
 - Secure token storage in macOS Keychain
+- First-run onboarding with quick setup option
 
 ## Requirements
 
@@ -86,17 +89,32 @@ Once authenticated, the widget displays:
 - **Menu Bar**: Shows your current 5-hour usage as a percentage
 - **Dropdown Panel**: Click the menu bar icon to see:
   - 5-hour usage window with progress bar
-  - Daily usage window with progress bar
+  - 7-day usage window with progress bar
   - Time until each window resets
   - Last refresh timestamp
+  - Account switcher (if multiple accounts configured)
+
+### Multi-Account Support
+
+The widget supports multiple Claude accounts, useful if you have separate Personal and Work accounts:
+
+1. **First Launch**: Choose "Quick Setup" to create Personal and Work accounts, or add a custom account
+2. **Adding Accounts**: Go to Settings and click "Add Account"
+3. **Switching Accounts**: Click the emoji icons in the header to switch between accounts
+4. **Managing Accounts**: In Settings, use the menu on each account to edit, update token, or delete
+
+Each account has:
+- A custom name (e.g., "Personal", "Work", "Project X")
+- An emoji icon for quick identification
+- Its own OAuth token stored securely in Keychain
 
 ### Settings
 
 Access settings by clicking the gear icon in the dropdown panel:
 
+- **Accounts**: Add, edit, or remove Claude accounts
 - **Refresh Interval**: How often to fetch new usage data (1-30 minutes)
 - **Launch at Login**: Automatically start the widget when you log in
-- **Token Management**: Update or clear your authentication token
 
 ## Troubleshooting
 

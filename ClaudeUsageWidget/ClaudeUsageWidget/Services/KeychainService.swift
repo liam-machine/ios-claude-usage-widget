@@ -107,4 +107,66 @@ class KeychainService {
         }
         return getOAuthToken()
     }
+
+    // MARK: - Multi-Account Token Management (Single Keychain Item)
+
+    private let allTokensServiceName = "ClaudeUsageWidget-tokens"
+
+    private func getAllTokens() -> [String: String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: allTokensServiceName,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let tokens = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+
+        return tokens
+    }
+
+    private func saveAllTokens(_ tokens: [String: String]) -> Bool {
+        guard let data = try? JSONEncoder().encode(tokens) else { return false }
+
+        // Delete existing
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: allTokensServiceName
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        // Add new
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: allTokensServiceName,
+            kSecValueData as String: data
+        ]
+
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        return status == errSecSuccess
+    }
+
+    func saveToken(_ token: String, forAccountId accountId: String) -> Bool {
+        var tokens = getAllTokens()
+        tokens[accountId] = token
+        return saveAllTokens(tokens)
+    }
+
+    func getToken(forAccountId accountId: String) -> String? {
+        let tokens = getAllTokens()
+        return tokens[accountId]
+    }
+
+    func deleteToken(forAccountId accountId: String) {
+        var tokens = getAllTokens()
+        tokens.removeValue(forKey: accountId)
+        _ = saveAllTokens(tokens)
+    }
 }

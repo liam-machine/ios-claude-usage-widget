@@ -16,7 +16,7 @@ struct UsageData: Codable {
 
 struct UsagePeriod: Codable {
     let utilization: Double
-    let resetsAt: String
+    let resetsAt: String?
 
     enum CodingKeys: String, CodingKey {
         case utilization
@@ -24,6 +24,7 @@ struct UsagePeriod: Codable {
     }
 
     var resetDate: Date? {
+        guard let resetsAt = resetsAt else { return nil }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = formatter.date(from: resetsAt) {
