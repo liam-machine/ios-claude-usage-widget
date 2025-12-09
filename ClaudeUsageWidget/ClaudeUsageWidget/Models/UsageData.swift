@@ -16,7 +16,7 @@ struct UsageData: Codable {
 
 struct UsagePeriod: Codable {
     let utilization: Double
-    let resetsAt: String
+    let resetsAt: String?
 
     enum CodingKeys: String, CodingKey {
         case utilization
@@ -24,6 +24,7 @@ struct UsagePeriod: Codable {
     }
 
     var resetDate: Date? {
+        guard let resetsAt = resetsAt else { return nil }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = formatter.date(from: resetsAt) {
@@ -97,6 +98,7 @@ struct UsagePeriod: Codable {
 
 enum UsageError: LocalizedError {
     case tokenNotFound
+    case tokenExpired
     case invalidResponse
     case networkError(Error)
     case unauthorized
@@ -105,15 +107,26 @@ enum UsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .tokenNotFound:
-            return "Claude Code OAuth token not found in Keychain"
+            return "No token configured for this account"
+        case .tokenExpired:
+            return "Token expired - click Import to refresh"
         case .invalidResponse:
             return "Invalid response from API"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
         case .unauthorized:
-            return "Unauthorized - please re-authenticate in Claude Code"
+            return "Unauthorized - token may have expired"
         case .insufficientScope:
             return "Token missing required scope. Run 'claude setup-token' in Terminal to generate a new token with usage access."
+        }
+    }
+
+    var requiresReimport: Bool {
+        switch self {
+        case .tokenNotFound, .tokenExpired, .unauthorized:
+            return true
+        default:
+            return false
         }
     }
 }

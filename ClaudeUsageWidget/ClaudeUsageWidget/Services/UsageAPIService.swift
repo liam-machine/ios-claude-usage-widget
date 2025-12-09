@@ -1,23 +1,56 @@
 import Foundation
+import os.log
 
 class UsageAPIService {
     static let shared = UsageAPIService()
 
-    private let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    // MARK: - Constants
+    private static let apiVersion = "oauth-2025-04-20"
+    private static let userAgent = "claude-code/2.0.31"
+
+    private static var usageURL: URL {
+        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+            fatalError("Invalid usage URL")
+        }
+        return url
+    }
+
+    // MARK: - Properties
+    private let logger = Logger(subsystem: "com.jamesdowzard.ClaudeUsageWidget", category: "UsageAPIService")
     private let keychainService = KeychainService.shared
 
     private init() {}
 
-    func fetchUsage() async throws -> UsageData {
-        guard let token = keychainService.getEffectiveToken() else {
+    /// Fetch usage for a specific account (preferred method)
+    func fetchUsage(for account: Account) async throws -> UsageData {
+        // Use TokenService to get a valid token
+        guard let token = TokenService.shared.getValidToken(for: account) else {
+            // Check if token is expired vs missing
+            if TokenService.shared.isTokenExpiredOrMissing(for: account) {
+                if KeychainService.shared.getCredentials(forAccountId: account.id.uuidString) != nil {
+                    throw UsageError.tokenExpired
+                }
+            }
             throw UsageError.tokenNotFound
         }
 
-        var request = URLRequest(url: usageURL)
+        return try await fetchUsageWithToken(token)
+    }
+
+    func fetchUsage(withToken token: String? = nil) async throws -> UsageData {
+        guard let effectiveToken = token ?? keychainService.getEffectiveToken() else {
+            throw UsageError.tokenNotFound
+        }
+        return try await fetchUsageWithToken(effectiveToken)
+    }
+
+    private func fetchUsageWithToken(_ token: String) async throws -> UsageData {
+
+        var request = URLRequest(url: Self.usageURL)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue("claude-code/2.0.31", forHTTPHeaderField: "User-Agent")
+        request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-beta")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -32,8 +65,10 @@ class UsageAPIService {
             do {
                 return try decoder.decode(UsageData.self, from: data)
             } catch {
-                print("Decoding error: \(error)")
-                print("Response data: \(String(data: data, encoding: .utf8) ?? "nil")")
+                logger.error("Decoding error: \(error.localizedDescription)")
+                if let responseString = String(data: data, encoding: .utf8) {
+                    logger.error("Response data: \(responseString)")
+                }
                 throw UsageError.invalidResponse
             }
         case 401:
@@ -46,9 +81,9 @@ class UsageAPIService {
             }
             throw UsageError.unauthorized
         default:
-            print("HTTP Status: \(httpResponse.statusCode)")
+            logger.error("HTTP Status: \(httpResponse.statusCode)")
             let responseString = String(data: data, encoding: .utf8) ?? "nil"
-            print("Response: \(responseString)")
+            logger.error("Response: \(responseString)")
             // Check for permission/scope errors in response body
             if responseString.contains("scope") || responseString.contains("permission") {
                 throw UsageError.insufficientScope

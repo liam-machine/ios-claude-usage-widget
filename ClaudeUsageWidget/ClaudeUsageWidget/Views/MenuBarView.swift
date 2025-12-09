@@ -5,6 +5,8 @@ struct MenuBarView: View {
     @State private var showingSettings = false
     @State private var showingTokenInput = false
     @State private var manualToken = ""
+    @State private var newAccountName = ""
+    @State private var newAccountIcon = "🏠"
 
     private let retroGray = Color(red: 0.75, green: 0.75, blue: 0.75)
     private let retroBackground = Color(red: 0.1, green: 0.1, blue: 0.1)
@@ -12,7 +14,9 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !viewModel.hasToken {
+            if viewModel.accountManager.accounts.isEmpty {
+                onboardingView
+            } else if !viewModel.hasToken {
                 tokenRequiredView
             } else if let error = viewModel.error {
                 errorView(error)
@@ -40,33 +44,54 @@ struct MenuBarView: View {
 
     private var tokenRequiredView: some View {
         VStack(spacing: 12) {
-            Text("[ ERROR ]")
-                .font(.system(.headline, design: .monospaced))
-                .foregroundColor(.red)
+            // Account toggle (only show if there are accounts)
+            if !viewModel.accountManager.accounts.isEmpty {
+                accountToggle
+            }
 
-            Text("OAuth Token Required")
+            Text("[ TOKEN REQUIRED ]")
+                .font(.system(.headline, design: .monospaced))
+                .foregroundColor(.orange)
+
+            Text("No token for \(viewModel.currentAccountName)")
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(retroGray)
 
-            Text("Run 'claude logout' then 'claude login' in terminal")
+            Text("Enter token from 'claude' CLI")
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(retroGray.opacity(0.7))
                 .multilineTextAlignment(.center)
 
-            Button("Enter Token Manually") {
-                showingTokenInput = true
+            HStack(spacing: 12) {
+                Button("Enter Token") {
+                    showingTokenInput = true
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(retroGray)
+
+                Button("Import from Claude") {
+                    _ = viewModel.importCredentialsFromClaudeCode()
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.green.opacity(0.7))
             }
-            .font(.system(.caption, design: .monospaced))
-            .foregroundColor(.black)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(retroGray)
         }
         .padding()
     }
 
     private func errorView(_ error: UsageError) -> some View {
         VStack(spacing: 12) {
+            // Account toggle (only show if there are multiple accounts)
+            if viewModel.accountManager.accounts.count > 1 {
+                accountToggle
+            }
+
             Text("[ ERROR ]")
                 .font(.system(.headline, design: .monospaced))
                 .foregroundColor(.red)
@@ -86,16 +111,24 @@ struct MenuBarView: View {
                 .padding(.vertical, 6)
                 .background(retroGray)
 
-                if case .unauthorized = error {
-                    Button("Update Token") {
-                        showingTokenInput = true
+                // Show import button for errors that require re-authentication
+                if error.requiresReimport {
+                    Button("Import from Claude") {
+                        _ = viewModel.importCredentialsFromClaudeCode()
                     }
                     .font(.system(.caption, design: .monospaced))
                     .foregroundColor(.black)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(retroGray)
+                    .background(Color.green.opacity(0.7))
                 }
+            }
+
+            if error.requiresReimport {
+                Text("Log into this account in Claude CLI, then click Import")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(retroGray.opacity(0.5))
+                    .multilineTextAlignment(.center)
             }
         }
         .padding()
@@ -103,18 +136,16 @@ struct MenuBarView: View {
 
     private func usageView(_ usage: UsageData) -> some View {
         VStack(spacing: 0) {
-            // Header
+            // Header with account selector
             HStack {
                 Text("Claude Code Usage")
                     .font(.system(.headline, design: .monospaced))
                     .foregroundColor(retroGray)
                 Spacer()
-                Image("LiamIcon")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 32, height: 32)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(retroGray.opacity(0.5), lineWidth: 1))
+                // Account toggle (only show if there are multiple accounts)
+                if viewModel.accountManager.accounts.count > 1 {
+                    accountToggle
+                }
             }
             .padding()
 
@@ -144,34 +175,52 @@ struct MenuBarView: View {
                 .background(retroBorder)
 
             // Footer
-            HStack {
-                Text("Last updated: \(viewModel.lastUpdatedText)")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundColor(retroGray.opacity(0.6))
+            VStack(spacing: 4) {
+                HStack {
+                    Text("Last updated: \(viewModel.lastUpdatedText)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(retroGray.opacity(0.6))
 
-                Spacer()
+                    Spacer()
 
-                Button(action: { viewModel.refresh() }) {
-                    Text("↻ Refresh")
-                        .font(.system(.caption, design: .monospaced))
+                    Button(action: { viewModel.refresh() }) {
+                        Text("↻ Refresh")
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(retroGray)
+                    .disabled(viewModel.isLoading)
+                    .accessibilityLabel("Refresh usage data")
+                    .accessibilityHint("Fetches the latest usage statistics from Claude API")
+
+                    Button(action: { showingSettings = true }) {
+                        Text("⚙ Settings")
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(retroGray)
+                    .accessibilityLabel("Open settings")
+                    .accessibilityHint("Opens the settings panel to manage accounts and preferences")
+
+                    Button(action: { NSApplication.shared.terminate(nil) }) {
+                        Text("×")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(retroGray)
+                    .accessibilityLabel("Quit application")
+                    .accessibilityHint("Closes the Claude Usage Widget application")
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(retroGray)
-                .disabled(viewModel.isLoading)
 
-                Button(action: { showingSettings = true }) {
-                    Text("⚙ Settings")
-                        .font(.system(.caption, design: .monospaced))
+                // Token expiry info
+                if let expiryText = viewModel.tokenExpiryDescription {
+                    HStack {
+                        Text("Token: \(expiryText)")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(expiryText == "Expired" ? .red : retroGray.opacity(0.5))
+                        Spacer()
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(retroGray)
-
-                Button(action: { NSApplication.shared.terminate(nil) }) {
-                    Text("×")
-                        .font(.system(.body, design: .monospaced))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(retroGray)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -196,10 +245,114 @@ struct MenuBarView: View {
         .padding(40)
     }
 
+    private var onboardingView: some View {
+        VStack(spacing: 16) {
+            Text("[ WELCOME ]")
+                .font(.system(.headline, design: .monospaced))
+                .foregroundColor(retroGray)
+
+            Text("Claude Code Usage Widget")
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(retroGray.opacity(0.8))
+
+            Text("Add your first account to get started")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(retroGray.opacity(0.6))
+                .multilineTextAlignment(.center)
+
+            VStack(spacing: 8) {
+                TextField("Account Name", text: $newAccountName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+
+                HStack(spacing: 4) {
+                    ForEach(Account.suggestedIcons.prefix(5), id: \.self) { icon in
+                        Button(action: {
+                            newAccountIcon = icon
+                        }) {
+                            Text(icon)
+                                .font(.system(size: 16))
+                                .frame(width: 32, height: 32)
+                                .background(newAccountIcon == icon ? retroGray : retroBorder.opacity(0.3))
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal)
+
+            HStack(spacing: 12) {
+                Button("Add Account") {
+                    if !newAccountName.isEmpty {
+                        let account = viewModel.accountManager.addAccount(name: newAccountName, icon: newAccountIcon)
+                        viewModel.accountManager.completeOnboarding()
+                        viewModel.selectAccount(account)
+                        newAccountName = ""
+                        newAccountIcon = "🏠"
+                    }
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(newAccountName.isEmpty ? retroGray.opacity(0.5) : retroGray)
+                .disabled(newAccountName.isEmpty)
+
+                Button("Quick Setup") {
+                    // Add common Personal/Work accounts
+                    let personal = viewModel.accountManager.addAccount(name: "Personal", icon: "🏠")
+                    _ = viewModel.accountManager.addAccount(name: "Work", icon: "💼")
+                    viewModel.accountManager.completeOnboarding()
+                    viewModel.selectAccount(personal)
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.green.opacity(0.7))
+            }
+
+            Button(action: { NSApplication.shared.terminate(nil) }) {
+                Text("Quit")
+                    .font(.system(.caption, design: .monospaced))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(retroGray.opacity(0.6))
+        }
+        .padding()
+    }
+
+    private var accountToggle: some View {
+        HStack(spacing: 0) {
+            ForEach(viewModel.accountManager.accounts) { account in
+                Button(action: {
+                    viewModel.selectAccount(account)
+                }) {
+                    Text(account.icon)
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(account.id == viewModel.selectedAccount?.id ? retroGray : retroBorder.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+                .help(account.name)
+                .accessibilityLabel("Switch to \(account.name)")
+                .accessibilityHint("Switches the active Claude account to view usage data")
+            }
+        }
+        .cornerRadius(4)
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(retroBorder, lineWidth: 1))
+    }
+
     private var tokenInputSheet: some View {
         VStack(spacing: 16) {
             Text("Enter OAuth Token")
                 .font(.system(.headline, design: .monospaced))
+                .foregroundColor(retroGray)
+
+            Text("For account: \(viewModel.currentAccountName)")
+                .font(.system(.body, design: .monospaced))
                 .foregroundColor(retroGray)
 
             Text("Run 'claude logout' then 'claude login' to get a new token")
@@ -218,8 +371,8 @@ struct MenuBarView: View {
                 }
 
                 Button("Save") {
-                    if !manualToken.isEmpty {
-                        _ = KeychainService.shared.saveManualToken(manualToken)
+                    if !manualToken.isEmpty, let account = viewModel.selectedAccount {
+                        viewModel.accountManager.updateToken(for: account, token: manualToken)
                         manualToken = ""
                         showingTokenInput = false
                         viewModel.refresh()
