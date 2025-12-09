@@ -10,6 +10,12 @@ class UsageViewModel: ObservableObject {
     @Published var error: UsageError?
     @Published var lastUpdated: Date?
 
+    // Team usage support
+    @Published var teamUsageData: TeamUsageData?
+    @Published var isLoadingTeam = false
+    @Published var teamError: UsageError?
+    @Published var lastTeamUpdated: Date?
+
     // Multi-account support
     @Published var accountManager = AccountManager.shared
     @Published var selectedAccount: Account?
@@ -19,6 +25,7 @@ class UsageViewModel: ObservableObject {
 
     private var refreshTimer: Timer?
     private let apiService = UsageAPIService.shared
+    private let adminAPIService = AdminAPIService.shared
     private var cancellables = Set<AnyCancellable>()
 
     // Static DateFormatter to avoid creating it repeatedly
@@ -31,8 +38,17 @@ class UsageViewModel: ObservableObject {
     init() {
         selectedAccount = accountManager.selectedAccount
         startAutoRefresh()
+
+        // Fetch initial data based on mode
         Task {
             await fetchUsage()
+
+            // Also fetch team data if in team mode
+            let settings = AppSettings.shared
+            if settings.hasCompletedSetup &&
+               (settings.mode == .team || settings.mode == .both) {
+                await fetchTeamUsage()
+            }
         }
 
         // Listen for account changes
@@ -124,6 +140,58 @@ class UsageViewModel: ObservableObject {
         refresh()
     }
 
+    func fetchTeamUsage() async {
+        isLoadingTeam = true
+        teamError = nil
+
+        do {
+            // Fetch today's usage
+            let response = try await adminAPIService.fetchTeamUsage(for: Date())
+
+            // Convert to TeamUsageData format
+            var totalTokens = 0
+            var members: [TeamMember] = []
+
+            for memberUsage in response.data {
+                totalTokens += memberUsage.totalTokens
+
+                // For now, we don't have edit/PR counts from the API
+                // These would need to be tracked separately
+                let member = TeamMember(
+                    id: memberUsage.memberEmail,
+                    email: memberUsage.memberEmail,
+                    tokenCount: memberUsage.totalTokens,
+                    editCount: 0,  // Not available from API
+                    prCount: 0     // Not available from API
+                )
+                members.append(member)
+            }
+
+            // Calculate cost (approximate - adjust pricing as needed)
+            let costPerMillion = 15.0 // Adjust based on actual pricing
+            let totalCost = (Double(totalTokens) / 1_000_000.0) * costPerMillion
+
+            teamUsageData = TeamUsageData(
+                totalTokens: totalTokens,
+                totalCost: totalCost,
+                members: members
+            )
+            lastTeamUpdated = Date()
+        } catch let adminError as AdminAPIError {
+            teamError = .networkError(adminError)
+        } catch {
+            teamError = .networkError(error)
+        }
+
+        isLoadingTeam = false
+    }
+
+    func refreshTeam() {
+        Task {
+            await fetchTeamUsage()
+        }
+    }
+
     func refresh() {
         Task {
             await fetchUsage()
@@ -137,6 +205,11 @@ class UsageViewModel: ObservableObject {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
+                // Also refresh team data if in team mode
+                if AppSettings.shared.mode == .team ||
+                   (AppSettings.shared.mode == .both && AppSettings.shared.showTeamView) {
+                    self?.refreshTeam()
+                }
             }
         }
     }

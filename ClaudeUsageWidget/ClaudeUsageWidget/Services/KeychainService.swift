@@ -291,4 +291,64 @@ class KeychainService {
         // Also clean up legacy token storage
         deleteToken(forAccountId: accountId)
     }
+
+    // MARK: - Admin API Key Management
+
+    private let adminAPIKeyServiceName = "ClaudeUsageWidget-adminkey"
+
+    func saveAdminAPIKey(_ key: String) -> Bool {
+        guard let data = key.data(using: .utf8) else {
+            os_log("Failed to encode admin API key as UTF-8 data", log: logger, type: .error)
+            return false
+        }
+
+        // Delete any existing item first
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: adminAPIKeyServiceName
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        // Add new item
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: adminAPIKeyServiceName,
+            kSecValueData as String: data
+        ]
+
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status != errSecSuccess {
+            os_log("Failed to save admin API key to keychain: %{public}d", log: logger, type: .error, status)
+            return false
+        }
+        return true
+    }
+
+    func getAdminAPIKey() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: adminAPIKeyServiceName,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let key = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return key
+    }
+
+    func deleteAdminAPIKey() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: adminAPIKeyServiceName
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
 }

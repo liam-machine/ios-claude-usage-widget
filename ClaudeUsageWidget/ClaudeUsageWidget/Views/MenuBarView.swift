@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var viewModel: UsageViewModel
+    @ObservedObject var settings: AppSettings
     @State private var showingSettings = false
     @State private var showingTokenInput = false
     @State private var manualToken = ""
@@ -13,6 +14,62 @@ struct MenuBarView: View {
     private let retroBorder = Color(red: 0.3, green: 0.3, blue: 0.3)
 
     var body: some View {
+        VStack(spacing: 0) {
+            // Show appropriate view based on mode
+            if shouldShowTeamView {
+                teamView
+            } else {
+                personalView
+            }
+        }
+        .frame(width: shouldShowTeamView ? 380 : 280)
+        .background(retroBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(retroBorder, lineWidth: 2)
+        )
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showingTokenInput) {
+            tokenInputSheet
+        }
+    }
+
+    // Determine which view to show
+    private var shouldShowTeamView: Bool {
+        switch settings.mode {
+        case .personal:
+            return false
+        case .team:
+            return true
+        case .both:
+            return settings.showTeamView
+        }
+    }
+
+    // MARK: - Team View
+
+    private var teamView: some View {
+        VStack(spacing: 0) {
+            // Mode toggle header (for both mode)
+            if settings.mode == .both {
+                modeToggleHeader
+            }
+
+            TeamDashboardView(
+                teamData: viewModel.teamUsageData,
+                isLoading: viewModel.isLoadingTeam,
+                error: viewModel.teamError,
+                onRefresh: { viewModel.refreshTeam() },
+                onSettings: { showingSettings = true }
+            )
+        }
+    }
+
+    // MARK: - Personal View
+
+    private var personalView: some View {
         VStack(spacing: 0) {
             if viewModel.accountManager.accounts.isEmpty {
                 onboardingView
@@ -28,18 +85,76 @@ struct MenuBarView: View {
                 emptyView
             }
         }
-        .frame(width: 280)
+    }
+
+    // MARK: - Mode Toggle Header
+
+    private var modeToggleHeader: some View {
+        HStack {
+            Text("View:")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(retroGray.opacity(0.6))
+
+            Menu {
+                Button(action: {
+                    settings.showTeamView = false
+                    viewModel.refresh()
+                }) {
+                    HStack {
+                        Text("👤 Personal")
+                        if !settings.showTeamView {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+
+                Button(action: {
+                    settings.showTeamView = true
+                    viewModel.refreshTeam()
+                }) {
+                    HStack {
+                        Text("👥 Team")
+                        if settings.showTeamView {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(settings.showTeamView ? "👥 Team" : "👤 Personal")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(retroGray)
+                    Text("▾")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(retroGray.opacity(0.6))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(retroBorder.opacity(0.3))
+                .cornerRadius(4)
+            }
+            .menuStyle(.borderlessButton)
+            .accessibilityLabel("Toggle between personal and team view")
+
+            Spacer()
+
+            Button(action: { NSApplication.shared.terminate(nil) }) {
+                Text("×")
+                    .font(.system(.body, design: .monospaced))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(retroGray)
+            .accessibilityLabel("Quit application")
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
         .background(retroBackground)
         .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .stroke(retroBorder, lineWidth: 2)
+            Rectangle()
+                .fill(retroBorder)
+                .frame(height: 1),
+            alignment: .bottom
         )
-        .sheet(isPresented: $showingSettings) {
-            SettingsView(viewModel: viewModel)
-        }
-        .sheet(isPresented: $showingTokenInput) {
-            tokenInputSheet
-        }
     }
 
     private var tokenRequiredView: some View {
@@ -437,5 +552,5 @@ struct RetroProgressBar: View {
 }
 
 #Preview {
-    MenuBarView(viewModel: UsageViewModel())
+    MenuBarView(viewModel: UsageViewModel(), settings: AppSettings.shared)
 }
