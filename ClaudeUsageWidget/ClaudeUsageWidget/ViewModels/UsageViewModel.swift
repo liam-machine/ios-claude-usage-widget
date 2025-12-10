@@ -20,7 +20,7 @@ class UsageViewModel: ObservableObject {
     @Published var accountManager = AccountManager.shared
     @Published var selectedAccount: Account?
 
-    @AppStorage("refreshInterval") var refreshInterval: Int = 5 // minutes
+    @AppStorage("refreshInterval") var refreshInterval: Int = 1 // minutes - fixed at 1 minute
     @AppStorage("launchAtLogin") var launchAtLogin: Bool = false
 
     private var refreshTimer: Timer?

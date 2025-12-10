@@ -1,10 +1,16 @@
 import SwiftUI
 
+// MARK: - Navigation Screen Enum
+enum MenuBarScreen {
+    case main
+    case settings
+    case tokenInput
+}
+
 struct MenuBarView: View {
     @ObservedObject var viewModel: UsageViewModel
     @ObservedObject var settings: AppSettings
-    @State private var showingSettings = false
-    @State private var showingTokenInput = false
+    @State private var currentScreen: MenuBarScreen = .main
     @State private var manualToken = ""
     @State private var newAccountName = ""
     @State private var newAccountIcon = "🏠"
@@ -14,8 +20,26 @@ struct MenuBarView: View {
     private let retroBorder = Color(red: 0.3, green: 0.3, blue: 0.3)
 
     var body: some View {
+        Group {
+            switch currentScreen {
+            case .main:
+                mainContent
+            case .settings:
+                SettingsView(
+                    viewModel: viewModel,
+                    onClose: { currentScreen = .main }
+                )
+            case .tokenInput:
+                tokenInputView
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: currentScreen)
+    }
+
+    // MARK: - Main Content
+
+    private var mainContent: some View {
         VStack(spacing: 0) {
-            // Show appropriate view based on mode
             if shouldShowTeamView {
                 teamView
             } else {
@@ -28,12 +52,6 @@ struct MenuBarView: View {
             RoundedRectangle(cornerRadius: 4)
                 .stroke(retroBorder, lineWidth: 2)
         )
-        .sheet(isPresented: $showingSettings) {
-            SettingsView(viewModel: viewModel)
-        }
-        .sheet(isPresented: $showingTokenInput) {
-            tokenInputSheet
-        }
     }
 
     // Determine which view to show
@@ -62,7 +80,7 @@ struct MenuBarView: View {
                 isLoading: viewModel.isLoadingTeam,
                 error: viewModel.teamError,
                 onRefresh: { viewModel.refreshTeam() },
-                onSettings: { showingSettings = true }
+                onSettings: { currentScreen = .settings }
             )
         }
     }
@@ -179,7 +197,7 @@ struct MenuBarView: View {
 
             HStack(spacing: 12) {
                 Button("Enter Token") {
-                    showingTokenInput = true
+                    currentScreen = .tokenInput
                 }
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(.black)
@@ -308,7 +326,7 @@ struct MenuBarView: View {
                     .accessibilityLabel("Refresh usage data")
                     .accessibilityHint("Fetches the latest usage statistics from Claude API")
 
-                    Button(action: { showingSettings = true }) {
+                    Button(action: { currentScreen = .settings }) {
                         Text("⚙ Settings")
                             .font(.system(.caption, design: .monospaced))
                     }
@@ -460,8 +478,27 @@ struct MenuBarView: View {
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(retroBorder, lineWidth: 1))
     }
 
-    private var tokenInputSheet: some View {
+    // MARK: - Token Input View (Inline)
+
+    private var tokenInputView: some View {
         VStack(spacing: 16) {
+            // Header with back button
+            HStack {
+                Button(action: { currentScreen = .main }) {
+                    HStack(spacing: 4) {
+                        Text("←")
+                        Text("Back")
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(retroGray)
+
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 12)
+
             Text("Enter OAuth Token")
                 .font(.system(.headline, design: .monospaced))
                 .foregroundColor(retroGray)
@@ -474,32 +511,47 @@ struct MenuBarView: View {
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(retroGray.opacity(0.7))
                 .multilineTextAlignment(.center)
+                .padding(.horizontal)
 
             SecureField("OAuth Token", text: $manualToken)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
+                .padding(.horizontal)
 
             HStack {
                 Button("Cancel") {
                     manualToken = ""
-                    showingTokenInput = false
+                    currentScreen = .main
                 }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(retroGray.opacity(0.5))
 
                 Button("Save") {
                     if !manualToken.isEmpty, let account = viewModel.selectedAccount {
                         viewModel.accountManager.updateToken(for: account, token: manualToken)
                         manualToken = ""
-                        showingTokenInput = false
+                        currentScreen = .main
                         viewModel.refresh()
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(manualToken.isEmpty ? retroGray.opacity(0.3) : retroGray)
                 .disabled(manualToken.isEmpty)
             }
+            .padding(.bottom, 16)
         }
-        .padding()
-        .frame(width: 350)
+        .frame(width: 300)
         .background(retroBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(retroBorder, lineWidth: 2)
+        )
     }
 }
 
