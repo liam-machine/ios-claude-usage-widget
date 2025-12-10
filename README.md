@@ -5,12 +5,6 @@ A macOS menu bar widget that displays your Claude API usage in real-time.
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/menu-bar-icon.png" alt="Menu Bar Icon" width="200">
-  <br>
-  <em>Menu bar showing usage percentage</em>
-</p>
-
-<p align="center">
   <img src="screenshots/main-usage.png" alt="Main Usage View" width="300">
   <br>
   <em>Main usage panel with 5-hour and 7-day limits</em>
