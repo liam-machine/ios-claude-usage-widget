@@ -2,13 +2,33 @@
 
 A macOS menu bar widget that displays your Claude API usage in real-time.
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/menu-bar-icon.png" alt="Menu Bar Icon" width="200">
+  <br>
+  <em>Menu bar showing usage percentage</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/main-usage.png" alt="Main Usage View" width="300">
+  <br>
+  <em>Main usage panel with 5-hour and 7-day limits</em>
+</p>
+
+<p align="center">
+  <img src="screenshots/settings.png" alt="Settings View" width="350">
+  <br>
+  <em>Settings with multi-account support</em>
+</p>
+
 ## Features
 
 - Displays current usage percentage in the menu bar
 - Shows detailed breakdown of 5-hour and 7-day usage windows
 - **Multi-account support**: Track usage across multiple Claude accounts (e.g., Personal and Work)
 - Quick account switching via emoji icons in the menu bar
-- Auto-refreshes at configurable intervals (1-30 minutes)
+- Auto-refreshes every minute
 - Optional launch at login
 - Secure token storage in macOS Keychain
 - First-run onboarding with quick setup option
@@ -123,7 +143,6 @@ Each account has:
 Access settings by clicking the gear icon in the dropdown panel:
 
 - **Accounts**: Add, edit, or remove Claude accounts
-- **Refresh Interval**: How often to fetch new usage data (1-30 minutes)
 - **Launch at Login**: Automatically start the widget when you log in
 
 ## Troubleshooting
