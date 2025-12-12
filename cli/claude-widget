@@ -1,0 +1,655 @@
+#!/usr/bin/env python3
+"""
+claude-widget - CLI interface for Claude Usage Widget
+
+Commands:
+  usage [account]     Show usage for one or all accounts
+  accounts            List all configured accounts
+  select <account>    Select active account
+  add <name> [icon]   Add a new account
+  remove <account>    Remove an account
+  import              Import credentials from Claude Code
+  refresh [account]   Refresh token for account(s)
+  status              Show widget status and token health
+  json [account]      Output usage as JSON (for scripting)
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+import uuid
+
+# Configuration
+CREDENTIALS_FILE = Path.home() / ".config" / "claude-usage-widget" / "credentials.json"
+CLAUDE_CODE_CREDENTIALS = Path.home() / ".claude" / "credentials.json"
+CLAUDE_ACCOUNTS_DIR = Path.home() / ".credentials" / "claude-accounts"
+API_URL = "https://api.anthropic.com/api/oauth/usage"
+TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+API_VERSION = "oauth-2025-04-20"
+USER_AGENT = "claude-code/2.0.31"
+
+
+class CredentialStore:
+    """Manages credential storage for the widget."""
+
+    def __init__(self):
+        self.file = CREDENTIALS_FILE
+        self._ensure_dir()
+
+    def _ensure_dir(self):
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+
+    def load(self) -> dict:
+        if not self.file.exists():
+            return {"accounts": [], "selectedAccountId": None}
+        try:
+            return json.loads(self.file.read_text())
+        except (json.JSONDecodeError, IOError):
+            return {"accounts": [], "selectedAccountId": None}
+
+    def save(self, data: dict):
+        self.file.write_text(json.dumps(data, indent=2))
+        os.chmod(self.file, 0o600)
+
+    def get_accounts(self) -> list[dict]:
+        return self.load().get("accounts", [])
+
+    def get_account(self, identifier: str) -> Optional[dict]:
+        """Get account by name (case-insensitive) or ID."""
+        accounts = self.get_accounts()
+        identifier_lower = identifier.lower()
+        for acc in accounts:
+            if acc.get("id") == identifier or acc.get("name", "").lower() == identifier_lower:
+                return acc
+        return None
+
+    def get_selected_account(self) -> Optional[dict]:
+        data = self.load()
+        selected_id = data.get("selectedAccountId")
+        if not selected_id:
+            accounts = data.get("accounts", [])
+            return accounts[0] if accounts else None
+        return self.get_account(selected_id)
+
+    def set_selected_account(self, account_id: str):
+        data = self.load()
+        data["selectedAccountId"] = account_id
+        self.save(data)
+
+    def add_account(self, name: str, icon: str, access_token: str, refresh_token: str, expires_at: float) -> dict:
+        data = self.load()
+        new_account = {
+            "id": str(uuid.uuid4()).upper(),
+            "name": name,
+            "icon": icon,
+            "accessToken": access_token,
+            "refreshToken": refresh_token,
+            "expiresAt": expires_at
+        }
+        data["accounts"].append(new_account)
+        if not data.get("selectedAccountId"):
+            data["selectedAccountId"] = new_account["id"]
+        self.save(data)
+        return new_account
+
+    def update_account_token(self, account_id: str, access_token: str, refresh_token: str, expires_at: float) -> bool:
+        data = self.load()
+        for acc in data["accounts"]:
+            if acc["id"] == account_id:
+                acc["accessToken"] = access_token
+                acc["refreshToken"] = refresh_token
+                acc["expiresAt"] = expires_at
+                self.save(data)
+                return True
+        return False
+
+    def remove_account(self, account_id: str) -> bool:
+        data = self.load()
+        original_len = len(data["accounts"])
+        data["accounts"] = [a for a in data["accounts"] if a["id"] != account_id]
+        if len(data["accounts"]) < original_len:
+            if data.get("selectedAccountId") == account_id:
+                data["selectedAccountId"] = data["accounts"][0]["id"] if data["accounts"] else None
+            self.save(data)
+            return True
+        return False
+
+
+def is_token_expired(account: dict, buffer_seconds: int = 300) -> bool:
+    """Check if token is expired or expiring soon."""
+    expires_at = account.get("expiresAt", 0)
+    if not expires_at:
+        return True
+    return datetime.now().timestamp() > (expires_at - buffer_seconds)
+
+
+def refresh_token(refresh_token_str: str) -> Optional[dict]:
+    """Refresh an access token using the refresh token."""
+    data = json.dumps({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token_str,
+        "client_id": CLIENT_ID
+    }).encode()
+
+    req = urllib.request.Request(
+        TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode())
+            return {
+                "accessToken": result["access_token"],
+                "refreshToken": result.get("refresh_token", refresh_token_str),
+                "expiresAt": datetime.now().timestamp() + result.get("expires_in", 3600)
+            }
+    except Exception as e:
+        return None
+
+
+def fetch_usage(token: str) -> dict:
+    """Fetch usage data from Anthropic API."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "anthropic-beta": API_VERSION,
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/json",
+    }
+
+    req = urllib.request.Request(API_URL, headers=headers)
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return {"error": "unauthorized", "message": "Token expired or invalid"}
+        elif e.code == 403:
+            return {"error": "forbidden", "message": "Insufficient scope"}
+        return {"error": "http_error", "message": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": "network_error", "message": str(e)}
+
+
+def get_valid_token(store: CredentialStore, account: dict) -> Optional[str]:
+    """Get a valid token, refreshing if necessary."""
+    if not is_token_expired(account):
+        return account.get("accessToken")
+
+    # Try to refresh
+    refresh = account.get("refreshToken")
+    if not refresh:
+        return None
+
+    new_creds = refresh_token(refresh)
+    if new_creds:
+        store.update_account_token(
+            account["id"],
+            new_creds["accessToken"],
+            new_creds["refreshToken"],
+            new_creds["expiresAt"]
+        )
+        return new_creds["accessToken"]
+
+    return None
+
+
+def format_time_until(resets_at: str) -> str:
+    """Format time until reset."""
+    try:
+        reset_date = datetime.fromisoformat(resets_at.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return "?"
+
+    now = datetime.now(reset_date.tzinfo)
+    delta = reset_date - now
+
+    if delta.total_seconds() <= 0:
+        return "now"
+
+    total_secs = int(delta.total_seconds())
+    days = total_secs // 86400
+    hours = (total_secs % 86400) // 3600
+    minutes = (total_secs % 3600) // 60
+
+    if days > 0:
+        return f"{days}d {hours}h"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
+def format_bar(pct: float, width: int = 20) -> str:
+    """Create ASCII progress bar."""
+    filled = int(pct / 100 * width)
+    empty = width - filled
+    return f"[{'█' * filled}{'░' * empty}]"
+
+
+def get_status_indicator(pct: float) -> str:
+    """Get status indicator based on usage percentage."""
+    if pct >= 80:
+        return "🔴"
+    elif pct >= 50:
+        return "🟡"
+    return "🟢"
+
+
+def print_usage_line(label: str, pct: float, resets_at: str, indent: str = "  "):
+    """Print a formatted usage line."""
+    bar = format_bar(pct)
+    status = get_status_indicator(pct)
+    reset = format_time_until(resets_at)
+    print(f"{indent}{label:8} {pct:5.1f}% {bar} {status} resets {reset}")
+
+
+def print_account_usage(store: CredentialStore, account: dict, verbose: bool = False):
+    """Print usage for a single account."""
+    name = account.get("name", "Unknown")
+    icon = account.get("icon", "👤")
+
+    token = get_valid_token(store, account)
+    if not token:
+        print(f"{icon} {name}: ❌ No valid token (run: claude-widget import)")
+        return
+
+    usage = fetch_usage(token)
+
+    if "error" in usage:
+        print(f"{icon} {name}: ❌ {usage.get('message', usage['error'])}")
+        return
+
+    # Header
+    five_hour = usage.get("five_hour", {})
+    seven_day = usage.get("seven_day", {})
+    five_pct = five_hour.get("utilization", 0)
+    seven_pct = seven_day.get("utilization", 0)
+
+    print(f"{icon} {name}: {int(five_pct)}% session · {int(seven_pct)}% weekly")
+
+    if verbose:
+        print_usage_line("5-hour", five_pct, five_hour.get("resets_at", ""))
+        print_usage_line("7-day", seven_pct, seven_day.get("resets_at", ""))
+
+        # Opus/Sonnet breakdown if available
+        opus = usage.get("seven_day_opus")
+        if opus:
+            print_usage_line("Opus", opus.get("utilization", 0), opus.get("resets_at", ""))
+
+        sonnet = usage.get("seven_day_sonnet")
+        if sonnet:
+            print_usage_line("Sonnet", sonnet.get("utilization", 0), sonnet.get("resets_at", ""))
+
+
+def get_claude_code_credentials() -> Optional[dict]:
+    """Get credentials from Claude Code's credential file."""
+    if not CLAUDE_CODE_CREDENTIALS.exists():
+        return None
+
+    try:
+        data = json.loads(CLAUDE_CODE_CREDENTIALS.read_text())
+        oauth = data.get("claudeAiOauth", {})
+        if oauth:
+            return {
+                "accessToken": oauth.get("accessToken"),
+                "refreshToken": oauth.get("refreshToken"),
+                "expiresAt": oauth.get("expiresAt", 0) / 1000  # Convert ms to seconds
+            }
+    except (json.JSONDecodeError, IOError):
+        pass
+
+    return None
+
+
+# === Commands ===
+
+def cmd_usage(args):
+    """Show usage for accounts."""
+    store = CredentialStore()
+    accounts = store.get_accounts()
+
+    if not accounts:
+        print("No accounts configured. Run: claude-widget add <name>")
+        return 1
+
+    if args.account:
+        account = store.get_account(args.account)
+        if not account:
+            print(f"Account not found: {args.account}")
+            return 1
+        print_account_usage(store, account, verbose=args.verbose)
+    else:
+        # Show all accounts
+        selected = store.get_selected_account()
+        selected_id = selected.get("id") if selected else None
+
+        for acc in accounts:
+            is_selected = acc.get("id") == selected_id
+            prefix = "▶ " if is_selected else "  "
+            print(prefix, end="")
+            print_account_usage(store, acc, verbose=args.verbose)
+
+    return 0
+
+
+def cmd_accounts(args):
+    """List all accounts."""
+    store = CredentialStore()
+    accounts = store.get_accounts()
+    selected = store.get_selected_account()
+    selected_id = selected.get("id") if selected else None
+
+    if not accounts:
+        print("No accounts configured. Run: claude-widget add <name>")
+        return 1
+
+    print("Accounts:")
+    for acc in accounts:
+        is_selected = acc.get("id") == selected_id
+        marker = "▶" if is_selected else " "
+        icon = acc.get("icon", "👤")
+        name = acc.get("name", "Unknown")
+
+        # Token status
+        if is_token_expired(acc):
+            status = "⚠️  token expired"
+        else:
+            expires = datetime.fromtimestamp(acc.get("expiresAt", 0))
+            status = f"✓ expires {expires.strftime('%H:%M')}"
+
+        print(f"  {marker} {icon} {name} - {status}")
+
+    return 0
+
+
+def cmd_select(args):
+    """Select active account."""
+    store = CredentialStore()
+    account = store.get_account(args.account)
+
+    if not account:
+        print(f"Account not found: {args.account}")
+        return 1
+
+    store.set_selected_account(account["id"])
+    print(f"Selected: {account.get('icon', '')} {account.get('name')}")
+    return 0
+
+
+def cmd_add(args):
+    """Add a new account."""
+    store = CredentialStore()
+
+    # Check if account already exists
+    existing = store.get_account(args.name)
+    if existing:
+        print(f"Account '{args.name}' already exists")
+        return 1
+
+    # Create with empty credentials (will need import)
+    icon = args.icon or "👤"
+    account = store.add_account(args.name, icon, "", "", 0)
+    print(f"Added: {icon} {args.name}")
+    print(f"Now run: claude-widget import {args.name}")
+    return 0
+
+
+def cmd_remove(args):
+    """Remove an account."""
+    store = CredentialStore()
+    account = store.get_account(args.account)
+
+    if not account:
+        print(f"Account not found: {args.account}")
+        return 1
+
+    if store.remove_account(account["id"]):
+        print(f"Removed: {account.get('icon', '')} {account.get('name')}")
+        return 0
+
+    print("Failed to remove account")
+    return 1
+
+
+def cmd_import(args):
+    """Import credentials from Claude Code."""
+    store = CredentialStore()
+
+    # Get Claude Code credentials
+    creds = get_claude_code_credentials()
+    if not creds or not creds.get("accessToken"):
+        print("No Claude Code credentials found")
+        print("Make sure Claude Code is logged in")
+        return 1
+
+    # If account specified, update that one
+    if args.account:
+        account = store.get_account(args.account)
+        if not account:
+            print(f"Account not found: {args.account}")
+            return 1
+
+        store.update_account_token(
+            account["id"],
+            creds["accessToken"],
+            creds["refreshToken"],
+            creds["expiresAt"]
+        )
+        print(f"Imported credentials to: {account.get('icon', '')} {account.get('name')}")
+    else:
+        # Import to selected account
+        selected = store.get_selected_account()
+        if not selected:
+            print("No account selected. Run: claude-widget add <name>")
+            return 1
+
+        store.update_account_token(
+            selected["id"],
+            creds["accessToken"],
+            creds["refreshToken"],
+            creds["expiresAt"]
+        )
+        print(f"Imported credentials to: {selected.get('icon', '')} {selected.get('name')}")
+
+    return 0
+
+
+def cmd_refresh(args):
+    """Refresh token for account(s)."""
+    store = CredentialStore()
+
+    if args.account:
+        accounts = [store.get_account(args.account)]
+        if not accounts[0]:
+            print(f"Account not found: {args.account}")
+            return 1
+    else:
+        accounts = store.get_accounts()
+
+    for acc in accounts:
+        name = acc.get("name", "Unknown")
+        icon = acc.get("icon", "👤")
+
+        refresh_tok = acc.get("refreshToken")
+        if not refresh_tok:
+            print(f"{icon} {name}: ❌ No refresh token")
+            continue
+
+        new_creds = refresh_token(refresh_tok)
+        if new_creds:
+            store.update_account_token(
+                acc["id"],
+                new_creds["accessToken"],
+                new_creds["refreshToken"],
+                new_creds["expiresAt"]
+            )
+            print(f"{icon} {name}: ✓ Refreshed")
+        else:
+            print(f"{icon} {name}: ❌ Refresh failed")
+
+    return 0
+
+
+def cmd_status(args):
+    """Show widget status and token health."""
+    store = CredentialStore()
+    accounts = store.get_accounts()
+
+    print("Claude Usage Widget Status")
+    print("=" * 40)
+    print(f"Credentials file: {CREDENTIALS_FILE}")
+    print(f"Accounts: {len(accounts)}")
+    print()
+
+    if not accounts:
+        print("No accounts configured")
+        return 0
+
+    for acc in accounts:
+        name = acc.get("name", "Unknown")
+        icon = acc.get("icon", "👤")
+
+        print(f"{icon} {name}")
+
+        # Token status
+        if not acc.get("accessToken"):
+            print("  Token: ❌ Not configured")
+        elif is_token_expired(acc):
+            print("  Token: ⚠️  Expired")
+        else:
+            expires = datetime.fromtimestamp(acc.get("expiresAt", 0))
+            remaining = expires - datetime.now()
+            mins = int(remaining.total_seconds() / 60)
+            print(f"  Token: ✓ Valid ({mins} min remaining)")
+
+        # Refresh token
+        if acc.get("refreshToken"):
+            print("  Refresh: ✓ Available")
+        else:
+            print("  Refresh: ❌ Not available")
+
+        print()
+
+    return 0
+
+
+def cmd_json(args):
+    """Output usage as JSON for scripting."""
+    store = CredentialStore()
+
+    if args.account:
+        account = store.get_account(args.account)
+        if not account:
+            print(json.dumps({"error": f"Account not found: {args.account}"}))
+            return 1
+        accounts = [account]
+    else:
+        accounts = store.get_accounts()
+
+    results = {}
+    for acc in accounts:
+        name = acc.get("name", "Unknown")
+        token = get_valid_token(store, acc)
+
+        if not token:
+            results[name] = {"error": "no_token"}
+            continue
+
+        usage = fetch_usage(token)
+        results[name] = usage
+
+    print(json.dumps(results, indent=2 if args.pretty else None))
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="CLI interface for Claude Usage Widget",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  claude-widget usage              Show usage for all accounts
+  claude-widget usage personal -v  Show detailed usage for 'personal' account
+  claude-widget accounts           List all accounts
+  claude-widget select work        Switch to 'work' account
+  claude-widget import             Import credentials from Claude Code
+  claude-widget json               Output all usage as JSON
+"""
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+    # usage
+    p_usage = subparsers.add_parser("usage", help="Show usage for accounts")
+    p_usage.add_argument("account", nargs="?", help="Account name or ID (default: all)")
+    p_usage.add_argument("-v", "--verbose", action="store_true", help="Show detailed breakdown")
+
+    # accounts
+    p_accounts = subparsers.add_parser("accounts", help="List all accounts")
+
+    # select
+    p_select = subparsers.add_parser("select", help="Select active account")
+    p_select.add_argument("account", help="Account name or ID")
+
+    # add
+    p_add = subparsers.add_parser("add", help="Add a new account")
+    p_add.add_argument("name", help="Account name")
+    p_add.add_argument("icon", nargs="?", help="Emoji icon (default: 👤)")
+
+    # remove
+    p_remove = subparsers.add_parser("remove", help="Remove an account")
+    p_remove.add_argument("account", help="Account name or ID")
+
+    # import
+    p_import = subparsers.add_parser("import", help="Import credentials from Claude Code")
+    p_import.add_argument("account", nargs="?", help="Account to import to (default: selected)")
+
+    # refresh
+    p_refresh = subparsers.add_parser("refresh", help="Refresh token for account(s)")
+    p_refresh.add_argument("account", nargs="?", help="Account name or ID (default: all)")
+
+    # status
+    p_status = subparsers.add_parser("status", help="Show widget status and token health")
+
+    # json
+    p_json = subparsers.add_parser("json", help="Output usage as JSON")
+    p_json.add_argument("account", nargs="?", help="Account name or ID (default: all)")
+    p_json.add_argument("-p", "--pretty", action="store_true", help="Pretty print JSON")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        # Default to usage
+        args.command = "usage"
+        args.account = None
+        args.verbose = False
+
+    commands = {
+        "usage": cmd_usage,
+        "accounts": cmd_accounts,
+        "select": cmd_select,
+        "add": cmd_add,
+        "remove": cmd_remove,
+        "import": cmd_import,
+        "refresh": cmd_refresh,
+        "status": cmd_status,
+        "json": cmd_json,
+    }
+
+    return commands[args.command](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
