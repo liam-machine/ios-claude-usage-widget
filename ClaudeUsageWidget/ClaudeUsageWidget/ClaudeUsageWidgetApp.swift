@@ -1,31 +1,122 @@
 import SwiftUI
+import AppKit
 
 @main
 struct ClaudeUsageWidgetApp: App {
-    @StateObject private var viewModel = UsageViewModel()
-    @StateObject private var settings = AppSettings.shared
-    @State private var showingSetup = false
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarView(viewModel: viewModel, settings: settings)
-                .onAppear {
-                    // Show setup if not completed
-                    showingSetup = !settings.hasCompletedSetup
-                }
-                .sheet(isPresented: $showingSetup) {
-                    SetupView(settings: settings)
-                        .onDisappear {
-                            // Refresh data after setup completes
-                            if settings.hasCompletedSetup {
-                                viewModel.refresh()
-                            }
-                        }
-                }
-        } label: {
-            MenuBarLabel(viewModel: viewModel, settings: settings)
+        // Empty scene - all UI is managed by AppDelegate's NSPopover
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+    }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    private var statusItem: NSStatusItem!
+    private var popover: NSPopover!
+    private var viewModel: UsageViewModel!
+    private var settings: AppSettings!
+    private var eventMonitor: Any?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Initialize view model and settings
+        viewModel = UsageViewModel()
+        settings = AppSettings.shared
+
+        // Create the status bar item
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+
+        if let button = statusItem.button {
+            updateStatusButton(button)
+            button.action = #selector(togglePopover)
+            button.target = self
+        }
+
+        // Create the popover
+        popover = NSPopover()
+        popover.contentSize = NSSize(width: 300, height: 400)
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.animates = true
+
+        // Set the SwiftUI content
+        let contentView = MenuBarView(viewModel: viewModel, settings: settings)
+        popover.contentViewController = NSHostingController(rootView: contentView)
+
+        // Setup timer to update status bar
+        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.updateStatusBar()
+        }
+
+        // Monitor for clicks outside to close popover
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            if let popover = self?.popover, popover.isShown {
+                popover.performClose(nil)
+            }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
+
+    private func updateStatusBar() {
+        Task { @MainActor in
+            if let button = statusItem.button {
+                updateStatusButton(button)
+            }
+        }
+    }
+
+    @MainActor
+    private func updateStatusButton(_ button: NSStatusBarButton) {
+        // Update icon
+        if let image = NSImage(named: "ClaudeIcon") {
+            image.isTemplate = true
+            image.size = NSSize(width: 16, height: 16)
+            button.image = image
+        }
+
+        // Update text
+        let usageText: String
+        if settings.mode == .team || (settings.mode == .both && settings.showTeamView) {
+            usageText = viewModel.teamUsageData?.formattedTotalTokens ?? "—"
+        } else {
+            if let usage = viewModel.usageData?.fiveHour {
+                usageText = "\(Int(usage.utilization))%"
+            } else {
+                usageText = "—%"
+            }
+        }
+
+        button.title = " \(usageText)"
+        button.imagePosition = .imageLeft
+    }
+
+    @objc func togglePopover() {
+        if let button = statusItem.button {
+            if popover.isShown {
+                popover.performClose(nil)
+            } else {
+                // Refresh content before showing
+                let contentView = MenuBarView(viewModel: viewModel, settings: settings)
+                popover.contentViewController = NSHostingController(rootView: contentView)
+                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+                // Keep app active to prevent dismissal during interactions
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+    }
+
+    // MARK: - NSPopoverDelegate
+
+    func popoverShouldDetach(_ popover: NSPopover) -> Bool {
+        return false
     }
 }
 

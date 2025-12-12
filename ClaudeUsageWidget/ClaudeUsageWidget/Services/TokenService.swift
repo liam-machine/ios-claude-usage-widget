@@ -36,9 +36,9 @@ class TokenService {
         }
 
         // Token expired - try to refresh
-        if let refreshToken = fileCredentials.getRefreshToken(forAccountId: accountId) {
+        if let storedRefreshToken = fileCredentials.getRefreshToken(forAccountId: accountId) {
             logger.info("Token expired for account \(account.name), attempting refresh...")
-            if let newCredentials = await refreshToken(for: account, using: refreshToken) {
+            if let newCredentials = await refreshToken(for: account, using: storedRefreshToken) {
                 return newCredentials.accessToken
             }
             logger.warning("Token refresh failed for account \(account.name)")
