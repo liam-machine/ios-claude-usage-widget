@@ -86,10 +86,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if settings.mode == .team || (settings.mode == .both && settings.showTeamView) {
             usageText = viewModel.teamUsageData?.formattedTotalTokens ?? "—"
         } else {
-            if let usage = viewModel.usageData?.fiveHour {
-                usageText = "\(Int(usage.utilization))%"
+            // Show both session (5hr) and weekly (7day) usage
+            if let data = viewModel.usageData {
+                let session = Int(data.fiveHour.utilization)
+                let weekly = Int(data.sevenDay.utilization)
+                usageText = "\(session)% · \(weekly)%"
             } else {
-                usageText = "—%"
+                usageText = "—% · —%"
             }
         }
 
@@ -145,11 +148,13 @@ struct MenuBarLabel: View {
             }
             return teamData.formattedTotalTokens
         } else {
-            // Personal usage
-            guard let usage = viewModel.usageData?.fiveHour else {
-                return "—%"
+            // Personal usage - show session and weekly
+            guard let data = viewModel.usageData else {
+                return "—% · —%"
             }
-            return "\(Int(usage.utilization))%"
+            let session = Int(data.fiveHour.utilization)
+            let weekly = Int(data.sevenDay.utilization)
+            return "\(session)% · \(weekly)%"
         }
     }
 }
