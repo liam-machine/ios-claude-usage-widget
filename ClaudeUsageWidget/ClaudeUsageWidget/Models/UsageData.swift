@@ -109,7 +109,7 @@ enum UsageError: LocalizedError {
         case .tokenNotFound:
             return "No token configured for this account"
         case .tokenExpired:
-            return "Token expired - click Import to refresh"
+            return "Token expired and refresh failed - click Import to re-authenticate"
         case .invalidResponse:
             return "Invalid response from API"
         case .networkError(let error):
