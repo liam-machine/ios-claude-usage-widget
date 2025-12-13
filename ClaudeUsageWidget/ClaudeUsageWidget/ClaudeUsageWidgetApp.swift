@@ -54,11 +54,13 @@ struct MenuBarLabel: View {
             }
             return teamData.formattedTotalTokens
         } else {
-            // Personal usage
-            guard let usage = viewModel.usageData?.fiveHour else {
-                return "—%"
+            // Personal usage - show BOTH session (5hr) and weekly (7day) percentages
+            guard let data = viewModel.usageData else {
+                return "—% · —%"
             }
-            return "\(Int(usage.utilization))%"
+            let session = Int(data.fiveHour.utilization)
+            let weekly = Int(data.sevenDay.utilization)
+            return "\(session)% · \(weekly)%"
         }
     }
 }

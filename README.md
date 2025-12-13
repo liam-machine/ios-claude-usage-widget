@@ -110,13 +110,64 @@ security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq 
 
 Once authenticated, the widget displays:
 
-- **Menu Bar**: Shows your current 5-hour usage as a percentage
+- **Menu Bar**: Shows both session (5-hour) and weekly (7-day) usage as `X% · Y%`
 - **Dropdown Panel**: Click the menu bar icon to see:
   - 5-hour usage window with progress bar
   - 7-day usage window with progress bar
   - Time until each window resets
   - Last refresh timestamp
   - Account switcher (if multiple accounts configured)
+
+## Command-Line Interface (CLI)
+
+A Python CLI tool is included for terminal-based usage monitoring and scripting.
+
+### CLI Installation
+
+```bash
+# Make the script executable
+chmod +x cli/claude-widget
+
+# Optional: Create a symlink for easy access
+ln -s $(pwd)/cli/claude-widget ~/bin/claude-widget
+```
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `claude-widget usage [account] [-v]` | Show usage for accounts |
+| `claude-widget accounts` | List configured accounts |
+| `claude-widget select <account>` | Switch active account |
+| `claude-widget add <name> [icon]` | Add new account |
+| `claude-widget remove <account>` | Remove account |
+| `claude-widget import [account]` | Import credentials from Claude Code |
+| `claude-widget refresh` | Show token status and refresh guidance |
+| `claude-widget status` | Show token health |
+| `claude-widget json [-p]` | JSON output for scripting |
+
+### CLI Examples
+
+```bash
+# Show usage for all accounts
+claude-widget usage
+
+# Show detailed usage with progress bars
+claude-widget usage -v
+
+# Show usage for specific account
+claude-widget usage personal -v
+
+# Import fresh credentials from Claude Code
+claude-widget import
+
+# Get JSON output for scripting
+claude-widget json --pretty
+```
+
+### Credential Sharing
+
+The CLI and macOS app share credentials via `~/.config/claude-usage-widget/credentials.json`. Changes made in either are immediately visible to both.
 
 ### Multi-Account Support
 

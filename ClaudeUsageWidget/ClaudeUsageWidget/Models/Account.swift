@@ -48,21 +48,23 @@ struct Account: Identifiable, Codable, Equatable {
 class AccountManager: ObservableObject {
     static let shared = AccountManager()
 
-    private let accountsKey = "ClaudeUsageWidget-accounts"
-    private let selectedAccountKey = "ClaudeUsageWidget-selectedAccount"
-    private let hasCompletedOnboardingKey = "ClaudeUsageWidget-hasCompletedOnboarding"
+    private let fileCredentials = FileCredentialService.shared
 
     @Published var accounts: [Account] = []
     @Published var selectedAccountId: UUID?
-    @Published var hasCompletedOnboarding: Bool = false
 
     var selectedAccount: Account? {
         guard let id = selectedAccountId else { return accounts.first }
         return accounts.first { $0.id == id }
     }
 
+    // Always completed if we have accounts in file
+    var hasCompletedOnboarding: Bool {
+        return !accounts.isEmpty
+    }
+
     var needsOnboarding: Bool {
-        return !hasCompletedOnboarding && accounts.isEmpty
+        return accounts.isEmpty
     }
 
     private init() {
@@ -70,46 +72,38 @@ class AccountManager: ObservableObject {
     }
 
     func loadAccounts() {
-        hasCompletedOnboarding = UserDefaults.standard.bool(forKey: hasCompletedOnboardingKey)
-
-        if let data = UserDefaults.standard.data(forKey: accountsKey),
-           let decoded = try? JSONDecoder().decode([Account].self, from: data) {
-            // Migration: add default icon if missing (for accounts created before icon support)
-            accounts = decoded.map { account in
-                if account.icon.isEmpty {
-                    var updated = account
-                    updated.icon = "👤"
-                    return updated
-                }
-                return account
-            }
-        } else {
-            // No accounts - don't create defaults, let user set up via onboarding
-            accounts = []
+        // Load from file-based credentials
+        let storedAccounts = fileCredentials.getAllAccounts()
+        accounts = storedAccounts.map { stored in
+            Account(
+                id: UUID(uuidString: stored.id) ?? UUID(),
+                name: stored.name,
+                icon: stored.icon,
+                token: ""  // Tokens are managed separately in file
+            )
         }
 
-        if let idString = UserDefaults.standard.string(forKey: selectedAccountKey),
-           let id = UUID(uuidString: idString) {
-            selectedAccountId = id
+        // Load selected account
+        if let selectedId = fileCredentials.getSelectedAccountId(),
+           let uuid = UUID(uuidString: selectedId) {
+            selectedAccountId = uuid
         } else {
             selectedAccountId = accounts.first?.id
         }
     }
 
     func saveAccounts() {
-        if let encoded = try? JSONEncoder().encode(accounts) {
-            UserDefaults.standard.set(encoded, forKey: accountsKey)
-        }
+        // Accounts are saved via FileCredentialService
+        // This is called for compatibility but actual saving happens in add/remove/update methods
     }
 
     func completeOnboarding() {
-        hasCompletedOnboarding = true
-        UserDefaults.standard.set(true, forKey: hasCompletedOnboardingKey)
+        // No-op - onboarding is complete when accounts exist
     }
 
     func selectAccount(_ account: Account) {
         selectedAccountId = account.id
-        UserDefaults.standard.set(account.id.uuidString, forKey: selectedAccountKey)
+        fileCredentials.setSelectedAccountId(account.id.uuidString)
         objectWillChange.send()
     }
 
@@ -117,31 +111,43 @@ class AccountManager: ObservableObject {
 
     @discardableResult
     func addAccount(name: String, icon: String = "👤") -> Account {
-        let account = Account(name: name, icon: icon)
+        // Add to file storage with empty credentials (will need import)
+        let stored = fileCredentials.addAccount(
+            name: name,
+            icon: icon,
+            accessToken: "",
+            refreshToken: "",
+            expiresAt: 0
+        )
+
+        let account = Account(
+            id: UUID(uuidString: stored.id) ?? UUID(),
+            name: name,
+            icon: icon
+        )
         accounts.append(account)
-        saveAccounts()
 
         // Select the new account if it's the first one
         if accounts.count == 1 {
             selectAccount(account)
         }
 
+        objectWillChange.send()
         return account
     }
 
     func removeAccount(_ account: Account) {
-        // Delete token from keychain
-        KeychainService.shared.deleteToken(forAccountId: account.id.uuidString)
+        // Remove from file storage
+        fileCredentials.removeAccount(byId: account.id.uuidString)
 
         // Remove from list
         accounts.removeAll { $0.id == account.id }
-        saveAccounts()
 
         // If we deleted the selected account, select another
         if selectedAccountId == account.id {
             selectedAccountId = accounts.first?.id
             if let id = selectedAccountId {
-                UserDefaults.standard.set(id.uuidString, forKey: selectedAccountKey)
+                fileCredentials.setSelectedAccountId(id.uuidString)
             }
         }
 
@@ -156,30 +162,24 @@ class AccountManager: ObservableObject {
             if let icon = icon {
                 accounts[index].icon = icon
             }
-            saveAccounts()
+            // Persist to file storage
+            _ = fileCredentials.updateAccountInfo(
+                accountId: account.id.uuidString,
+                name: name,
+                icon: icon
+            )
             objectWillChange.send()
         }
     }
 
     func updateToken(for account: Account, token: String) {
-        if let index = accounts.firstIndex(where: { $0.id == account.id }) {
-            accounts[index].token = token
-            saveAccounts()
-            // Also save to keychain for security
-            _ = KeychainService.shared.saveToken(token, forAccountId: account.id.uuidString)
-        }
+        // Tokens are managed by FileCredentialService, not here
+        // This method is kept for compatibility but does nothing
     }
 
     func getToken(for account: Account) -> String? {
-        // First try keychain (more secure)
-        if let token = KeychainService.shared.getToken(forAccountId: account.id.uuidString), !token.isEmpty {
-            return token
-        }
-        // Fall back to stored token
-        if let stored = accounts.first(where: { $0.id == account.id })?.token, !stored.isEmpty {
-            return stored
-        }
-        return nil
+        // Use file-based credentials
+        return fileCredentials.getValidToken(forAccountId: account.id.uuidString)
     }
 
     // Legacy method for backwards compatibility

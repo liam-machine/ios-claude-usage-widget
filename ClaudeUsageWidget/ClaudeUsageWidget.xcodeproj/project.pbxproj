@@ -12,6 +12,7 @@
 		A100000123345678000000A /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000123345678000002D /* Account.swift */; };
 		A1000001233456780000003 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001233456780000013 /* KeychainService.swift */; };
 		A100000123345678000000B /* TokenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000123345678000002E /* TokenService.swift */; };
+		A100000123345678000000C /* FileCredentialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000123345678000002F /* FileCredentialService.swift */; };
 		A1000001233456780000004 /* UsageAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001233456780000014 /* UsageAPIService.swift */; };
 		A1000001233456780000005 /* UsageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001233456780000015 /* UsageViewModel.swift */; };
 		A1000001233456780000006 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000001233456780000016 /* MenuBarView.swift */; };
@@ -33,6 +34,7 @@
 		A100000123345678000002D /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
 		A1000001233456780000013 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		A100000123345678000002E /* TokenService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenService.swift; sourceTree = "<group>"; };
+		A100000123345678000002F /* FileCredentialService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileCredentialService.swift; sourceTree = "<group>"; };
 		A1000001233456780000014 /* UsageAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageAPIService.swift; sourceTree = "<group>"; };
 		A1000001233456780000015 /* UsageViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageViewModel.swift; sourceTree = "<group>"; };
 		A1000001233456780000016 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
@@ -105,6 +107,7 @@
 			children = (
 				A1000001233456780000013 /* KeychainService.swift */,
 				A100000123345678000002E /* TokenService.swift */,
+				A100000123345678000002F /* FileCredentialService.swift */,
 				A1000001233456780000014 /* UsageAPIService.swift */,
 				A1000001233456780000032 /* AdminAPIService.swift */,
 			);
@@ -206,6 +209,7 @@
 				A100000123345678000000A /* Account.swift in Sources */,
 				A1000001233456780000003 /* KeychainService.swift in Sources */,
 				A100000123345678000000B /* TokenService.swift in Sources */,
+				A100000123345678000000C /* FileCredentialService.swift in Sources */,
 				A1000001233456780000004 /* UsageAPIService.swift in Sources */,
 				A1000001233456780000005 /* UsageViewModel.swift in Sources */,
 				A1000001233456780000006 /* MenuBarView.swift in Sources */,

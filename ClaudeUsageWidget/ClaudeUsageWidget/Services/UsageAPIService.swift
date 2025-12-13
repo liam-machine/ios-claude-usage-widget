@@ -22,12 +22,14 @@ class UsageAPIService {
     private init() {}
 
     /// Fetch usage for a specific account (preferred method)
+    /// Automatically attempts to refresh expired tokens
     func fetchUsage(for account: Account) async throws -> UsageData {
-        // Use TokenService to get a valid token
-        guard let token = TokenService.shared.getValidToken(for: account) else {
-            // Check if token is expired vs missing
+        // Use async token service that attempts refresh if expired
+        guard let token = await TokenService.shared.getValidTokenAsync(for: account) else {
+            // Token refresh failed or no credentials - check why
             if TokenService.shared.isTokenExpiredOrMissing(for: account) {
                 if KeychainService.shared.getCredentials(forAccountId: account.id.uuidString) != nil {
+                    // Had credentials but refresh failed
                     throw UsageError.tokenExpired
                 }
             }
