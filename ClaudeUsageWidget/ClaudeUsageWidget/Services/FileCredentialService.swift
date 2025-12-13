@@ -5,7 +5,7 @@ import os.log
 class FileCredentialService {
     static let shared = FileCredentialService()
 
-    private let logger = Logger(subsystem: "com.jamesdowzard.ClaudeUsageWidget", category: "FileCredentialService")
+    private let logger = Logger(subsystem: "com.liamwynne.ClaudeUsageWidget", category: "FileCredentialService")
     private let configDir: URL
     private let credentialsFile: URL
 
@@ -98,6 +98,21 @@ class FileCredentialService {
             credentials.accounts[index].accessToken = accessToken
             credentials.accounts[index].refreshToken = refreshToken
             credentials.accounts[index].expiresAt = expiresAt
+            return saveCredentials(credentials)
+        }
+        return false
+    }
+
+    func updateAccountInfo(accountId: String, name: String?, icon: String?) -> Bool {
+        guard var credentials = loadCredentials() else { return false }
+
+        if let index = credentials.accounts.firstIndex(where: { $0.id == accountId }) {
+            if let name = name {
+                credentials.accounts[index].name = name
+            }
+            if let icon = icon {
+                credentials.accounts[index].icon = icon
+            }
             return saveCredentials(credentials)
         }
         return false

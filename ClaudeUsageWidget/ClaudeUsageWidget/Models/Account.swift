@@ -162,8 +162,12 @@ class AccountManager: ObservableObject {
             if let icon = icon {
                 accounts[index].icon = icon
             }
-            // Note: Would need to add updateAccountInfo to FileCredentialService
-            // For now, changes are in-memory only
+            // Persist to file storage
+            _ = fileCredentials.updateAccountInfo(
+                accountId: account.id.uuidString,
+                name: name,
+                icon: icon
+            )
             objectWillChange.send()
         }
     }

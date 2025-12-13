@@ -9,9 +9,12 @@ Commands:
   add <name> [icon]   Add a new account
   remove <account>    Remove an account
   import              Import credentials from Claude Code
-  refresh [account]   Refresh token for account(s)
+  refresh             Show token status and refresh guidance
   status              Show widget status and token health
   json [account]      Output usage as JSON (for scripting)
+
+Note: Token refresh is handled automatically by the macOS app.
+      Use 'import' to get fresh credentials from Claude Code.
 """
 
 import argparse
@@ -31,8 +34,6 @@ CREDENTIALS_FILE = Path.home() / ".config" / "claude-usage-widget" / "credential
 CLAUDE_CODE_CREDENTIALS = Path.home() / ".claude" / "credentials.json"
 CLAUDE_ACCOUNTS_DIR = Path.home() / ".credentials" / "claude-accounts"
 API_URL = "https://api.anthropic.com/api/oauth/usage"
-TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
-CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 API_VERSION = "oauth-2025-04-20"
 USER_AGENT = "claude-code/2.0.31"
 
@@ -131,33 +132,6 @@ def is_token_expired(account: dict, buffer_seconds: int = 300) -> bool:
     return datetime.now().timestamp() > (expires_at - buffer_seconds)
 
 
-def refresh_token(refresh_token_str: str) -> Optional[dict]:
-    """Refresh an access token using the refresh token."""
-    data = json.dumps({
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token_str,
-        "client_id": CLIENT_ID
-    }).encode()
-
-    req = urllib.request.Request(
-        TOKEN_URL,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            result = json.loads(response.read().decode())
-            return {
-                "accessToken": result["access_token"],
-                "refreshToken": result.get("refresh_token", refresh_token_str),
-                "expiresAt": datetime.now().timestamp() + result.get("expires_in", 3600)
-            }
-    except Exception as e:
-        return None
-
-
 def fetch_usage(token: str) -> dict:
     """Fetch usage data from Anthropic API."""
     headers = {
@@ -183,25 +157,15 @@ def fetch_usage(token: str) -> dict:
 
 
 def get_valid_token(store: CredentialStore, account: dict) -> Optional[str]:
-    """Get a valid token, refreshing if necessary."""
+    """Get a valid token if available. Does NOT auto-refresh.
+
+    Token refresh is handled by the macOS app. If token is expired,
+    user should either open the app or run 'claude-widget import'.
+    """
     if not is_token_expired(account):
         return account.get("accessToken")
 
-    # Try to refresh
-    refresh = account.get("refreshToken")
-    if not refresh:
-        return None
-
-    new_creds = refresh_token(refresh)
-    if new_creds:
-        store.update_account_token(
-            account["id"],
-            new_creds["accessToken"],
-            new_creds["refreshToken"],
-            new_creds["expiresAt"]
-        )
-        return new_creds["accessToken"]
-
+    # Token expired - CLI does not refresh, user must use app or import
     return None
 
 
@@ -467,37 +431,44 @@ def cmd_import(args):
 
 
 def cmd_refresh(args):
-    """Refresh token for account(s)."""
+    """Show token status and refresh guidance.
+
+    Token refresh is handled automatically by the macOS app.
+    This command shows current status and how to get fresh tokens.
+    """
+    print("Token Refresh Guidance")
+    print("=" * 40)
+    print()
+    print("Token refresh is handled by the macOS Claude Usage Widget app.")
+    print()
+    print("To get fresh tokens:")
+    print("  1. Open the Claude Usage Widget app (it auto-refreshes)")
+    print("  2. Or run: claude-widget import")
+    print("     This imports fresh credentials from Claude Code")
+    print()
+
+    # Show current token status
     store = CredentialStore()
+    accounts = store.get_accounts()
 
-    if args.account:
-        accounts = [store.get_account(args.account)]
-        if not accounts[0]:
-            print(f"Account not found: {args.account}")
-            return 1
-    else:
-        accounts = store.get_accounts()
+    if not accounts:
+        print("No accounts configured.")
+        return 1
 
+    print("Current token status:")
     for acc in accounts:
         name = acc.get("name", "Unknown")
         icon = acc.get("icon", "👤")
 
-        refresh_tok = acc.get("refreshToken")
-        if not refresh_tok:
-            print(f"{icon} {name}: ❌ No refresh token")
-            continue
-
-        new_creds = refresh_token(refresh_tok)
-        if new_creds:
-            store.update_account_token(
-                acc["id"],
-                new_creds["accessToken"],
-                new_creds["refreshToken"],
-                new_creds["expiresAt"]
-            )
-            print(f"{icon} {name}: ✓ Refreshed")
+        if not acc.get("accessToken"):
+            print(f"  {icon} {name}: No token - run 'claude-widget import'")
+        elif is_token_expired(acc):
+            print(f"  {icon} {name}: Expired - run 'claude-widget import'")
         else:
-            print(f"{icon} {name}: ❌ Refresh failed")
+            expires = datetime.fromtimestamp(acc.get("expiresAt", 0))
+            remaining = expires - datetime.now()
+            mins = int(remaining.total_seconds() / 60)
+            print(f"  {icon} {name}: Valid ({mins} min remaining)")
 
     return 0
 
@@ -617,8 +588,7 @@ Examples:
     p_import.add_argument("account", nargs="?", help="Account to import to (default: selected)")
 
     # refresh
-    p_refresh = subparsers.add_parser("refresh", help="Refresh token for account(s)")
-    p_refresh.add_argument("account", nargs="?", help="Account name or ID (default: all)")
+    p_refresh = subparsers.add_parser("refresh", help="Show token status and refresh guidance")
 
     # status
     p_status = subparsers.add_parser("status", help="Show widget status and token health")

@@ -6,7 +6,7 @@ import os.log
 class TokenService {
     static let shared = TokenService()
 
-    private let logger = Logger(subsystem: "com.jamesdowzard.ClaudeUsageWidget", category: "TokenService")
+    private let logger = Logger(subsystem: "com.liamwynne.ClaudeUsageWidget", category: "TokenService")
     private let fileCredentials = FileCredentialService.shared
 
     // Anthropic OAuth configuration
